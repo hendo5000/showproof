@@ -1,5 +1,6 @@
 services:
   concerts:
+    image: ghcr.io/hendo5000/showproof:main
     build: .
     restart: unless-stopped
     ports: ["8000:8000"]
