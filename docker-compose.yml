@@ -1,0 +1,20 @@
+services:
+  concerts:
+    build: .
+    restart: unless-stopped
+    ports: ["8000:8000"]
+    environment:
+      SETLISTFM_API_KEY: ${SETLISTFM_API_KEY:-}   # free key: https://www.setlist.fm/settings/api
+      SECRET_KEY: ${SECRET_KEY:-}                 # optional; auto-generated in /data otherwise
+      COBALT_URL: http://cobalt:9000
+    volumes:
+      - ./data:/data
+    depends_on: [cobalt]
+
+  cobalt:                                         # media resolver; not exposed outside the compose network
+    image: ghcr.io/imputnet/cobalt:11
+    init: true
+    restart: unless-stopped
+    environment:
+      API_URL: http://cobalt:9000/                # must match how the app reaches it (tunnel URLs are built from this)
+    # volumes: ["./cookies.json:/cookies.json:ro"]  # + COOKIE_PATH: /cookies.json for login-gated posts

@@ -1,0 +1,6 @@
+data/
+.git/
+.github/
+.env
+__pycache__/
+*.tar.gz
