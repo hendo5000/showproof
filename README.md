@@ -1,4 +1,4 @@
-# Concert Tracker
+# ShowProof
 Self-hosted (Flask + SQLite) concert log. MIT-style: do what you like with it.
 
     mkdir -p data && chown 1000 data   # container runs as uid 1000
