@@ -1,5 +1,6 @@
-import os, sqlite3, secrets, json, uuid, requests, time, threading
+import base64, os, sqlite3, secrets, json, uuid, requests, time, threading
 from datetime import datetime
+from urllib.parse import urlparse
 from flask import (Flask, g, request, session, redirect, render_template, send_from_directory,
                    abort, flash, url_for)
 from jinja2 import DictLoader
@@ -22,7 +23,7 @@ def secret():
 
 app = Flask(__name__)
 app.secret_key = secret()
-app.config.update(MAX_CONTENT_LENGTH=4 * 1024**3, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True)
+app.config.update(MAX_CONTENT_LENGTH=4 * 1024**3, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True, PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 365)
 
 def conn():
     c = sqlite3.connect(os.path.join(DATA, "app.db")); c.row_factory = sqlite3.Row; return c
@@ -33,10 +34,12 @@ with conn() as c:
     CREATE TABLE IF NOT EXISTS concerts(id INTEGER PRIMARY KEY, user_id INT, artist TEXT, venue TEXT, city TEXT,
       date TEXT, notes TEXT DEFAULT '', setlist TEXT DEFAULT '[]', sid TEXT, UNIQUE(user_id, sid));
     CREATE TABLE IF NOT EXISTS media(id INTEGER PRIMARY KEY, concert_id INT, file TEXT, kind TEXT);
+    CREATE TABLE IF NOT EXISTS venues(id INTEGER PRIMARY KEY, name TEXT, city TEXT, file TEXT, tried REAL DEFAULT 0, UNIQUE(name, city));
     CREATE TABLE IF NOT EXISTS attendees(concert_id INT, user_id INT, PRIMARY KEY(concert_id, user_id));
     """)
     for stmt in ("ALTER TABLE users ADD COLUMN sfm_user TEXT DEFAULT ''", "ALTER TABLE users ADD COLUMN last_sync REAL DEFAULT 0",
-                 "ALTER TABLE concerts ADD COLUMN poster TEXT"):
+                 "ALTER TABLE concerts ADD COLUMN poster TEXT", "ALTER TABLE media ADD COLUMN uploader INT",
+                 "ALTER TABLE media ADD COLUMN platform TEXT"):
         try: c.execute(stmt)
         except sqlite3.OperationalError: pass
 
@@ -61,7 +64,7 @@ def guard():
         abort(400)
     uid = session.get("uid")
     g.user = (q("SELECT * FROM users WHERE id=?", uid) or [None])[0] if uid else None
-    if not g.user and request.endpoint not in ("login", "join", "static", "logo"):
+    if not g.user and request.endpoint not in ("login", "join", "static", "logo", "touch_icon"):
         return redirect(url_for("login"))
 
 def sfm(path, **params):
@@ -87,7 +90,7 @@ def login():
     if request.method == "POST":
         u = (q("SELECT * FROM users WHERE name=?", request.form["name"].strip()) or [None])[0]
         if u and check_password_hash(u["pw"], request.form["pw"]):
-            session.clear(); session["uid"] = u["id"]; return redirect("/")
+            session.clear(); session["uid"] = u["id"]; session.permanent = True; return redirect("/")
         flash("Wrong name or password")
     return render_template("login", first=not q("SELECT 1 FROM users"))
 
@@ -104,7 +107,7 @@ def join():
         else:
             uid = run("INSERT INTO users(name,pw,admin) VALUES(?,?,?)", name, generate_password_hash(pw), int(first)).lastrowid
             if not first: run("UPDATE invites SET used_by=? WHERE token=?", uid, tok)
-            session.clear(); session["uid"] = uid; return redirect("/")
+            session.clear(); session["uid"] = uid; session.permanent = True; return redirect("/")
     return render_template("join", tok_value=tok, first=first)
 
 @app.post("/logout")
@@ -188,7 +191,8 @@ def settings():
         run("UPDATE users SET sfm_user=?, last_sync=0 WHERE id=?", request.form["sfm_user"].strip(), g.user["id"])
         threading.Thread(target=sync_bg, args=(g.user["id"],), daemon=True).start()
         flash("Saved. Importing in the background; refresh in a minute."); return redirect("/settings")
-    return render_template("settings", u=q("SELECT * FROM users WHERE id=?", g.user["id"])[0])
+    return render_template("settings", u=q("SELECT * FROM users WHERE id=?", g.user["id"])[0],
+        venues=q("SELECT DISTINCT venue, city FROM concerts WHERE user_id=? AND venue!='' ORDER BY venue", g.user["id"]))
 
 @app.post("/sync")
 def sync():
@@ -215,7 +219,7 @@ def concert(cid):
     c = owned(cid)
     att = q("SELECT u.id,u.name FROM attendees a JOIN users u ON u.id=a.user_id WHERE a.concert_id=?", cid)
     ids = {a["id"] for a in att} | {c["user_id"]}
-    return render_template("concert", c=c, songs=json.loads(c["setlist"]), media=q("SELECT * FROM media WHERE concert_id=?", cid),
+    return render_template("concert", c=c, songs=json.loads(c["setlist"]), media=q("SELECT m.*, u.name uname FROM media m LEFT JOIN users u ON u.id=COALESCE(m.uploader,?) WHERE m.concert_id=? ORDER BY m.id", c["user_id"], cid),
         can=g.user["id"] in ids, mine=c["user_id"] == g.user["id"], att=att,
         owner=q("SELECT name FROM users WHERE id=?", c["user_id"])[0]["name"],
         others=[u for u in q("SELECT id,name FROM users ORDER BY name") if u["id"] not in ids])
@@ -233,7 +237,7 @@ def upload(cid):
         kind = "image" if ext in IMG else "video" if ext in VID else None
         if not kind: flash(f"Skipped {f.filename}: unsupported type"); continue
         name = f"{uuid.uuid4().hex}.{ext}"; f.save(os.path.join(MEDIA, name))
-        run("INSERT INTO media(concert_id,file,kind) VALUES(?,?,?)", cid, name, kind)
+        add_media(cid, name, kind)
     return redirect(f"/c/{cid}")
 
 CT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif",
@@ -270,7 +274,7 @@ def link(cid):
     else:
         try:
             for name, kind in cobalt_fetch(url):
-                run("INSERT INTO media(concert_id,file,kind) VALUES(?,?,?)", cid, name, kind)
+                add_media(cid, name, kind, platform(url))
         except Exception as e: flash(f"cobalt: {e}")
     return redirect(f"/c/{cid}")
 
@@ -324,7 +328,7 @@ def poster(cid):
         ext = f.filename.rsplit(".", 1)[-1].lower()
         if ext in IMG:
             name = f"{uuid.uuid4().hex}.{ext}"; f.save(os.path.join(MEDIA, name))
-            run("INSERT INTO media(concert_id,file,kind) VALUES(?,?,?)", cid, name, "image")
+            add_media(cid, name, "image")
             run("UPDATE concerts SET poster=? WHERE id=?", name, cid)
         else: flash("Cover must be an image")
     return redirect(f"/c/{cid}")
@@ -342,8 +346,72 @@ LOGO = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><lin
 @app.get("/logo.svg")
 def logo(): return app.response_class(LOGO, mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
+ICON_PNG = base64.b64decode("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")
+
+@app.get("/apple-touch-icon.png")
+@app.get("/apple-touch-icon-precomposed.png")
+def touch_icon(): return app.response_class(ICON_PNG, mimetype="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
 app.jinja_env.filters["hue"] = lambda s: sum(map(ord, s or "x")) % 360
 app.jinja_env.filters["ts"] = lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "never"
+
+def platform(url):
+    h = (urlparse(url).hostname or "").lower()
+    for k, p in (("instagram", "instagram"), ("tiktok", "tiktok"), ("youtu", "youtube"), ("twitter", "x"), ("x.com", "x")):
+        if k in h: return p
+    return "link"
+
+def add_media(cid, name, kind, plat=None):
+    run("INSERT INTO media(concert_id,file,kind,uploader,platform) VALUES(?,?,?,?,?)", cid, name, kind, g.user["id"], plat)
+
+def venue_row(n, c):
+    run("INSERT OR IGNORE INTO venues(name,city) VALUES(?,?)", n, c)
+    return q("SELECT * FROM venues WHERE name=? AND city=?", n, c)[0]
+
+def venue_fetch(n, c):
+    r = requests.get("https://en.wikipedia.org/w/api.php", timeout=10, headers={"User-Agent": "ShowProof/1.0 (self-hosted)"},
+        params={"action": "query", "generator": "search", "gsrsearch": f"{n} {c}", "gsrlimit": 1, "prop": "pageimages",
+                "piprop": "thumbnail", "pithumbsize": 900, "format": "json"}).json()
+    for p in r.get("query", {}).get("pages", {}).values():
+        words = [w.lower() for w in n.split() if len(w) > 3] or [n.lower()]
+        src = p.get("thumbnail", {}).get("source")
+        if src and any(w in p.get("title", "").lower() for w in words):
+            d = requests.get(src, timeout=20, headers={"User-Agent": "ShowProof/1.0 (self-hosted)"})
+            ext = CT.get(d.headers.get("content-type", "").split(";")[0].strip())
+            if d.ok and ext in IMG:
+                name = f"venue-{uuid.uuid4().hex}.{ext}"; open(os.path.join(MEDIA, name), "wb").write(d.content); return name
+
+@app.get("/venue.img")
+def venue_img():
+    n, c = request.args.get("n", "").strip(), request.args.get("c", "").strip()
+    if not n: abort(404)
+    v = venue_row(n, c)
+    if not v["file"] and not v["tried"]:
+        run("UPDATE venues SET tried=? WHERE id=?", time.time(), v["id"])
+        try:
+            f = venue_fetch(n, c)
+            if f: run("UPDATE venues SET file=? WHERE id=?", f, v["id"])
+        except Exception as e: app.logger.info("venue image %s: %s", n, e)
+        v = venue_row(n, c)
+    return send_from_directory(MEDIA, v["file"] or abort(404), conditional=True)
+
+@app.post("/venue/replace")
+def venue_replace():
+    n, c, f = request.form["n"].strip(), request.form["c"].strip(), request.files.get("file")
+    ext = (f.filename or "").rsplit(".", 1)[-1].lower() if f else ""
+    if ext not in IMG: flash("Venue image must be a picture"); return redirect("/settings")
+    v = venue_row(n, c); name = f"venue-{uuid.uuid4().hex}.{ext}"; f.save(os.path.join(MEDIA, name))
+    if v["file"]:
+        try: os.remove(os.path.join(MEDIA, v["file"]))
+        except OSError: pass
+    run("UPDATE venues SET file=?, tried=? WHERE id=?", name, time.time(), v["id"])
+    flash("Venue image updated"); return redirect("/settings")
+
+ICONS = {"instagram": '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r=".8"/>',
+         "youtube": '<rect x="2" y="5" width="20" height="14" rx="5"/><path d="M10 9l5 3-5 3z"/>',
+         "tiktok": '<path d="M14 3v11.5a3.5 3.5 0 11-3.5-3.5M14 3c.3 2.5 2 4 4.5 4.2"/>', "x": '<path d="M4 4l16 16M20 4L4 20"/>',
+         "link": '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>'}
+app.jinja_env.globals["ICONS"] = ICONS
 
 # ---------- templates ----------
 CSS = """:root{color-scheme:dark;--bg:#0d0d12;--fg:#f2f2f5;--mu:#9a9aa8;--ac:#a855f7;--cd:#1b1b24}
@@ -353,7 +421,14 @@ header img{width:30px;height:30px}header b{font-size:1.3rem}main{max-width:900px
 h2{margin:.4rem 0 .8rem}.row{background:var(--cd);border-radius:10px;padding:.8rem 1rem;margin:.6rem 0;display:block;color:inherit;text-decoration:none}
 .mu{color:var(--mu);font-size:.9rem}input,select,textarea,button{font:inherit;padding:.5rem .7rem;border-radius:8px;border:1px solid #fff2;background:var(--cd);color:var(--fg);margin:.2rem 0;max-width:100%}
 button{background:var(--ac);color:#fff;border:0;cursor:pointer}button.l{background:none;color:var(--ac);padding:0}.flash{background:#a855f733;padding:.5rem .8rem;border-radius:8px}
-form.i{display:inline}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.5rem}.g img,.g video{width:100%;border-radius:8px}
+form.i{display:inline}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.5rem}.tile{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;cursor:pointer;background:#222}.tile img,.tile video{width:100%;height:100%;object-fit:cover;display:block}
+.play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff;text-shadow:0 1px 6px #000}.acts{display:flex;gap:1rem;margin:.3rem 0 .6rem}
+.bd{position:absolute;left:6px;bottom:6px;width:24px;height:24px;border-radius:50%;background:#000a;color:#fff;font:700 .75rem system-ui;font-style:normal;display:flex;align-items:center;justify-content:center}
+.bd svg{width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#viewer{position:fixed;inset:0;background:#000;z-index:20;display:none}#viewer.on{display:block}#vs{height:100%;overflow-y:auto;scroll-snap-type:y mandatory}
+#vs section{height:100%;scroll-snap-align:start;scroll-snap-stop:always;display:flex;align-items:center;justify-content:center;position:relative}#vs img,#vs video{max-width:100%;max-height:100%}
+#vs .bd{left:14px;bottom:calc(14px + env(safe-area-inset-bottom));width:30px;height:30px}#vx{position:fixed;top:calc(.8rem + env(safe-area-inset-top));right:1rem;z-index:21;background:#000a;border-radius:50%;width:38px;height:38px;padding:0}
+.venrow{display:flex;gap:.8rem;align-items:center;margin:.6rem 0}.venrow img{width:96px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#222;flex:none}
 .chips{display:flex;gap:.5rem;overflow-x:auto;margin-bottom:.8rem}.chips select,.chips a{border-radius:99px;padding:.55rem 1rem;background:var(--cd);color:var(--fg);text-decoration:none;white-space:nowrap}
 .chips a.x{background:var(--ac)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.8rem}
 .card{position:relative;aspect-ratio:16/9;border-radius:16px;overflow:hidden;display:block;color:#fff;text-decoration:none;
@@ -367,7 +442,7 @@ background:linear-gradient(135deg,hsl(var(--h) 55% 38%),hsl(calc(var(--h) + 50) 
 .pill a.on{background:#a855f733;color:var(--ac)}.sb{width:62px;display:flex;align-items:center;justify-content:center;color:#ddd}.sb.on{color:var(--ac)}
 .bar svg{width:24px;height:24px;display:block;margin:0 auto 2px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}"""
 T = {
-"base": """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ShowProof</title><link rel=icon href="/logo.svg"><meta name=theme-color content="#0d0d12"><style>""" + CSS + """</style>
+"base": """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ShowProof</title><link rel=icon href="/logo.svg"><link rel=apple-touch-icon href="/apple-touch-icon.png"><meta name=apple-mobile-web-app-title content="ShowProof"><meta name=theme-color content="#0d0d12"><style>""" + CSS + """</style>
 <header><img src="/logo.svg" alt=""><b>ShowProof</b></header><main>{% for m in get_flashed_messages() %}<p class=flash>{{m}}</p>{% endfor %}{% block c %}{% endblock %}</main>
 {% if g.user %}{% set e=request.endpoint %}<div class=bar><nav class=pill>
 <a href="/" class="{{'on' if e in ('home','user','concert','new')}}"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v10H3z"/></svg>Shows</a>
@@ -384,12 +459,14 @@ T = {
 <form class=chips>{% if sort!='date' or year %}<a class=x href="{{request.path}}">✕</a>{% endif %}
 <select name=year onchange="this.form.submit()"><option value="">Years</option>{% for y in years %}<option {{'selected' if y==year}}>{{y}}</option>{% endfor %}</select>
 <select name=sort onchange="this.form.submit()">{% for k,l in [('date','Newest'),('oldest','Oldest'),('artist','Artist'),('venue','Venue'),('city','City'),('added','Recently added')] %}<option value={{k}} {{'selected' if k==sort}}>Sort: {{l}}</option>{% endfor %}</select></form>
-<div class=grid>{% for r in rows %}<a class=card href="/c/{{r.id}}" style="--h:{{r.artist|hue}}">{% if r.poster %}<img loading=lazy src="/cover/{{r.id}}?v={{r.poster[:8]}}">{% endif %}
+<div class=grid>{% for r in rows %}<a class=card href="/c/{{r.id}}" style="--h:{{r.artist|hue}}">{% if r.poster %}<img loading=lazy src="/cover/{{r.id}}?v={{r.poster[:8]}}">{% elif r.venue %}<img loading=lazy src="/venue.img?n={{r.venue|urlencode}}&c={{r.city|urlencode}}" onerror="this.remove()">{% endif %}
 <div class=ov><b>{{r.artist}}</b><span>{{r.date}} · {{r.venue}}</span></div>{% if r.n %}<i class=dot>{{r.n}}</i>{% endif %}</a>{% else %}<p class=mu>Nothing yet. Set your setlist.fm username under Me, or tap ＋.</p>{% endfor %}</div>{% endblock %}""",
 "people": """{% extends "base" %}{% block c %}<h2>People</h2>{% for r in rows %}<a class=row href="/u/{{r.name}}"><b>{{r.name}}</b> <span class=mu>{{r.n}} shows</span></a>{% endfor %}{% endblock %}""",
 "settings": """{% extends "base" %}{% block c %}<h2>{{u.name}}</h2><h3>setlist.fm</h3><p class=mu>Shows you attended are imported daily. Last sync: {{u.last_sync|ts}}</p>
 <form method=post>{{tok()}}<input name=sfm_user value="{{u.sfm_user or ''}}" placeholder="setlist.fm username"><button>Save &amp; import</button></form>
 {% if u.sfm_user %}<form method=post action="/sync">{{tok()}}<button class=l>Sync now</button></form>{% endif %}
+<h3>Venue images</h3><p class=mu>Picked automatically from Wikipedia when a match exists. Replace any that are wrong or missing.</p>
+{% for v in venues %}<form class=venrow method=post action="/venue/replace" enctype=multipart/form-data>{{tok()}}<img src="/venue.img?n={{v.venue|urlencode}}&c={{v.city|urlencode}}" onerror="this.style.visibility='hidden'"><div><b>{{v.venue}}</b><br><input type=hidden name=n value="{{v.venue}}"><input type=hidden name=c value="{{v.city}}"><input type=file name=file accept="image/*" required><button>Replace</button></div></form>{% endfor %}
 {% if u.admin %}<p><a href="/invites">Manage invites</a></p>{% endif %}<form method=post action="/logout">{{tok()}}<button>Log out</button></form>{% endblock %}""",
 "search": """{% extends "base" %}{% block c %}<h2>Search setlist.fm</h2><form><input name=artist value="{{a}}" placeholder=Artist required><input name=year value="{{y}}" placeholder="Year" size=6><button>Search</button></form>
 {% for r in res %}<div class=row><b>{{r.artist}}</b> · {{r.date}}<br><span class=mu>{{r.venue}}, {{r.city}} · {{r.setlist|length}} songs</span>
@@ -397,7 +474,7 @@ T = {
 "new": """{% extends "base" %}{% block c %}<h2>Add a show</h2><form method=post>{{tok()}}<input name=artist placeholder=Artist required><br><input name=venue placeholder=Venue><br>
 <input name=city placeholder=City><br><input type=date name=date required><br><textarea name=setlist rows=6 cols=36 placeholder="Setlist, one song per line"></textarea><br>
 <textarea name=notes rows=3 cols=36 placeholder=Notes></textarea><br><button>Save</button></form>{% endblock %}""",
-"concert": """{% extends "base" %}{% block c %}<div class="card hero" style="--h:{{c.artist|hue}}">{% if c.poster %}<img src="/cover/{{c.id}}?v={{c.poster[:8]}}">{% endif %}
+"concert": """{% extends "base" %}{% block c %}{% from "macros" import badge %}<div class="card hero" style="--h:{{c.artist|hue}}">{% if c.poster %}<img src="/cover/{{c.id}}?v={{c.poster[:8]}}">{% elif c.venue %}<img src="/venue.img?n={{c.venue|urlencode}}&c={{c.city|urlencode}}" onerror="this.remove()">{% endif %}
 <div class=ov><b>{{c.artist}}</b><span>{{c.date}}</span></div></div>
 <p class=mu>{{c.venue}}{% if c.city %}, {{c.city}}{% endif %}</p>
 <p>Who went: <a href="/u/{{owner}}">{{owner}}</a>{% for a in att %}, <a href="/u/{{a.name}}">{{a.name}}</a>{% if mine %} <form class=i method=post action="/c/{{c.id}}/untag">{{tok()}}<input type=hidden name=uid value="{{a.id}}"><button class=l>×</button></form>{% endif %}{% endfor %}</p>
@@ -405,12 +482,20 @@ T = {
 {% if can %}<form method=post action="/c/{{c.id}}/notes">{{tok()}}<textarea name=notes rows=3 style="width:100%" placeholder=Notes>{{c.notes}}</textarea><button>Save notes</button></form>
 <form method=post action="/c/{{c.id}}/poster" enctype=multipart/form-data>{{tok()}}<input type=file name=file accept="image/*" required><button>Change cover</button></form>
 {% elif c.notes %}<p>{{c.notes}}</p>{% endif %}
-<h3>Media</h3><div class=g>{% for m in media %}<div>{% if m.kind=='image' %}<a href="/media/{{m.id}}"><img loading=lazy src="/media/{{m.id}}"></a>{% else %}<video controls preload=metadata src="/media/{{m.id}}"></video>{% endif %}
-{% if can %}<form class=i method=post action="/media/{{m.id}}/delete">{{tok()}}<button class=l>remove</button></form>{% if m.kind=='image' %}<form class=i method=post action="/c/{{c.id}}/poster">{{tok()}}<input type=hidden name=mid value="{{m.id}}"><button class=l>make cover</button></form>{% endif %}{% endif %}</div>{% endfor %}</div>
+<h3>Media</h3><div class=g>{% for m in media %}<div><div class=tile data-i="{{loop.index0}}">{% if m.kind=='image' %}<img loading=lazy src="/media/{{m.id}}">{% else %}<video preload=metadata muted playsinline src="/media/{{m.id}}#t=0.1"></video><span class=play>▶</span>{% endif %}{{badge(m)}}</div>
+{% if can %}<div class=acts><form method=post action="/media/{{m.id}}/delete">{{tok()}}<button class=l>remove</button></form>{% if m.kind=='image' %}<form method=post action="/c/{{c.id}}/poster">{{tok()}}<input type=hidden name=mid value="{{m.id}}"><button class=l>set cover</button></form>{% endif %}</div>{% endif %}</div>{% endfor %}</div>
 {% if can %}<form method=post action="/c/{{c.id}}/upload" enctype=multipart/form-data>{{tok()}}<input type=file name=files multiple accept="image/*,video/*" required><button>Upload</button></form>
 <form method=post action="/c/{{c.id}}/link">{{tok()}}<input name=url type=url placeholder="Paste an Instagram post/reel link" size=34 required><button>Fetch</button></form>{% endif %}
 {% if songs %}<h3>Setlist</h3><ol>{% for s in songs %}<li>{{s}}</li>{% endfor %}</ol>{% endif %}
-{% if mine %}<form method=post action="/c/{{c.id}}/delete" onsubmit="return confirm('Delete this show and its media?')">{{tok()}}<button class=l>Delete show</button></form>{% endif %}{% endblock %}""",
+{% if mine %}<form method=post action="/c/{{c.id}}/delete" onsubmit="return confirm('Delete this show and its media?')">{{tok()}}<button class=l>Delete show</button></form>{% endif %}
+<div id=viewer><button id=vx>✕</button><div id=vs>{% for m in media %}<section>{% if m.kind=='image' %}<img src="/media/{{m.id}}">{% else %}<video src="/media/{{m.id}}" controls muted loop playsinline preload=none></video>{% endif %}{{badge(m)}}</section>{% endfor %}</div></div>
+<script>const V=document.getElementById('viewer'),S=document.getElementById('vs');
+const io=new IntersectionObserver(es=>es.forEach(e=>{const v=e.target.querySelector('video');if(v){e.isIntersecting?v.play().catch(()=>{}):v.pause()}}),{threshold:.6});
+S.querySelectorAll('section').forEach(s=>io.observe(s));
+document.querySelectorAll('.tile').forEach(t=>t.onclick=()=>{V.classList.add('on');document.body.style.overflow='hidden';S.children[t.dataset.i].scrollIntoView()});
+function cl(){V.classList.remove('on');document.body.style.overflow='';S.querySelectorAll('video').forEach(v=>v.pause())}
+document.getElementById('vx').onclick=cl;document.addEventListener('keydown',e=>{if(e.key=='Escape')cl()});</script>{% endblock %}""",
 }
+T["macros"] = """{% macro badge(m) %}<i class=bd>{% if m.platform %}<svg viewBox="0 0 24 24">{{ICONS[m.platform]|safe}}</svg>{% else %}{{(m.uname or '?')[:1]|upper}}{% endif %}</i>{% endmacro %}"""
 app.jinja_loader = DictLoader(T)
 threading.Thread(target=loop, daemon=True).start()
