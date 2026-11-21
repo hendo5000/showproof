@@ -414,36 +414,46 @@ ICONS = {"instagram": '<rect x="3" y="3" width="18" height="18" rx="5"/><circle 
 app.jinja_env.globals["ICONS"] = ICONS
 
 # ---------- templates ----------
-CSS = """:root{color-scheme:dark;--bg:#0d0d12;--fg:#f2f2f5;--mu:#9a9aa8;--ac:#a855f7;--cd:#1b1b24}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif}
-a{color:var(--ac)}header{display:flex;gap:.6rem;align-items:center;justify-content:center;padding:calc(.8rem + env(safe-area-inset-top)) 1rem .8rem;border-bottom:1px solid #fff1}
-header img{width:30px;height:30px}header b{font-size:1.3rem}main{max-width:900px;margin:auto;padding:1rem 1rem 8rem}
-h2{margin:.4rem 0 .8rem}.row{background:var(--cd);border-radius:10px;padding:.8rem 1rem;margin:.6rem 0;display:block;color:inherit;text-decoration:none}
-.mu{color:var(--mu);font-size:.9rem}input,select,textarea,button{font:inherit;padding:.5rem .7rem;border-radius:8px;border:1px solid #fff2;background:var(--cd);color:var(--fg);margin:.2rem 0;max-width:100%}
-button{background:var(--ac);color:#fff;border:0;cursor:pointer}button.l{background:none;color:var(--ac);padding:0}.flash{background:#a855f733;padding:.5rem .8rem;border-radius:8px}
-form.i{display:inline}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.5rem}.tile{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;cursor:pointer;background:#222}.tile img,.tile video{width:100%;height:100%;object-fit:cover;display:block}
-.play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff;text-shadow:0 1px 6px #000}.acts{display:flex;gap:1rem;margin:.3rem 0 .6rem}
-.bd{position:absolute;left:6px;bottom:6px;width:24px;height:24px;border-radius:50%;background:#000a;color:#fff;font:700 .75rem system-ui;font-style:normal;display:flex;align-items:center;justify-content:center}
+CSS = """:root{color-scheme:dark;--bg:#0b0b10;--s1:#15151c;--s2:#1f1f29;--bd:#ffffff14;--fg:#f4f4f6;--mu:#9a9aaa;--ac:#a855f7;--r1:12px;--r2:16px;--rp:999px;--ch:44px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,sans-serif}
+a{color:var(--ac)}h1,h2{font-size:1.6rem;line-height:1.2;margin:.4rem 0 1rem}h3{font-size:1.05rem;margin:1.5rem 0 .6rem}
+header{position:sticky;top:0;z-index:8;display:flex;align-items:center;justify-content:space-between;height:calc(60px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 16px 0;background:#0b0b10e6;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--bd)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--fg);text-decoration:none}.brand img{width:32px;height:32px;border-radius:8px}.brand b{font-size:1.15rem}
+.ib{width:40px;height:40px;border-radius:50%;background:var(--s2);border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;color:var(--fg)}
+.ib svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+main{max-width:900px;margin:0 auto;padding:16px 16px 120px}
+.row{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r2);padding:14px 16px;margin:0 0 12px;display:block;color:inherit;text-decoration:none}
+.mu{color:var(--mu);font-size:.9rem;font-weight:400}h1 .mu{font-size:1rem}
+input,select,textarea,button{font:inherit;color:var(--fg);background:var(--s2);border:1px solid var(--bd);border-radius:var(--r1);padding:0 14px;min-height:var(--ch);max-width:100%;margin:4px 0}
+textarea{padding:10px 14px}input[type=file]{padding:9px 12px}button{background:var(--ac);border:0;font-weight:600;color:#fff;cursor:pointer}
+button.l{background:none;color:var(--ac);padding:0;min-height:0;margin:0;font-weight:500}
+.flash{background:#a855f722;border:1px solid #a855f744;padding:10px 14px;border-radius:var(--r1)}
+form.i{display:inline}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.chips{display:flex;gap:8px;overflow-x:auto;margin-bottom:16px}.chips select,.chips a{height:40px;min-height:40px;border-radius:var(--rp);padding:0 16px;margin:0;display:flex;align-items:center;white-space:nowrap;text-decoration:none;color:var(--fg);flex:none}
+.chips a.x{background:var(--ac);width:40px;padding:0;justify-content:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.card{position:relative;aspect-ratio:16/9;border-radius:var(--r2);overflow:hidden;display:block;color:#fff;text-decoration:none;border:1px solid var(--bd);
+background:linear-gradient(135deg,hsl(var(--h) 55% 38%),hsl(calc(var(--h) + 50) 65% 16%))}
+.card img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero{margin-bottom:12px}
+.ov{position:absolute;inset:auto 0 0;padding:32px 16px 14px;background:linear-gradient(transparent,#000d)}.ov b{display:block;font-size:1.2rem}.ov span{color:#ddd;font-size:.85rem;display:block}
+.dot{position:absolute;top:12px;right:12px;background:var(--ac);border-radius:var(--rp);min-width:24px;height:24px;font:600 .75rem/24px system-ui;text-align:center;font-style:normal;padding:0 7px}
+.bar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:12px;justify-content:center;padding:16px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,#000a 60%);z-index:9}
+.pill,.sb{background:#1f1f29d9;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid #ffffff1f;height:64px}
+.pill{display:flex;flex:1;max-width:420px;padding:4px;border-radius:32px}
+.pill a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:28px;color:#bbb;text-decoration:none;font-size:11px;font-weight:600}
+.pill a.on{background:#a855f729;color:var(--ac)}.sb{width:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#ddd}.sb.on{color:var(--ac)}
+.bar svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tile{position:relative;aspect-ratio:1;border-radius:var(--r1);overflow:hidden;cursor:pointer;background:var(--s2)}.tile img,.tile video{width:100%;height:100%;object-fit:cover;display:block}
+.play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff;text-shadow:0 1px 6px #000}.acts{display:flex;gap:16px;margin:6px 0 8px}
+.bd{position:absolute;left:8px;bottom:8px;width:24px;height:24px;border-radius:50%;background:#000a;color:#fff;font:700 .75rem system-ui;font-style:normal;display:flex;align-items:center;justify-content:center}
 .bd svg{width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #viewer{position:fixed;inset:0;background:#000;z-index:20;display:none}#viewer.on{display:block}#vs{height:100%;overflow-y:auto;scroll-snap-type:y mandatory}
 #vs section{height:100%;scroll-snap-align:start;scroll-snap-stop:always;display:flex;align-items:center;justify-content:center;position:relative}#vs img,#vs video{max-width:100%;max-height:100%}
-#vs .bd{left:14px;bottom:calc(14px + env(safe-area-inset-bottom));width:30px;height:30px}#vx{position:fixed;top:calc(.8rem + env(safe-area-inset-top));right:1rem;z-index:21;background:#000a;border-radius:50%;width:38px;height:38px;padding:0}
-.venrow{display:flex;gap:.8rem;align-items:center;margin:.6rem 0}.venrow img{width:96px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#222;flex:none}
-.chips{display:flex;gap:.5rem;overflow-x:auto;margin-bottom:.8rem}.chips select,.chips a{border-radius:99px;padding:.55rem 1rem;background:var(--cd);color:var(--fg);text-decoration:none;white-space:nowrap}
-.chips a.x{background:var(--ac)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.8rem}
-.card{position:relative;aspect-ratio:16/9;border-radius:16px;overflow:hidden;display:block;color:#fff;text-decoration:none;
-background:linear-gradient(135deg,hsl(var(--h) 55% 38%),hsl(calc(var(--h) + 50) 65% 16%))}
-.card img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero{margin-bottom:.8rem}
-.ov{position:absolute;inset:auto 0 0;padding:2rem .9rem .7rem;background:linear-gradient(transparent,#000d)}.ov b{display:block;font-size:1.2rem}.ov span{color:#ddd;font-size:.85rem;display:block}
-.dot{position:absolute;top:10px;right:10px;background:var(--ac);border-radius:99px;min-width:24px;height:24px;font:600 .75rem/24px system-ui;text-align:center;font-style:normal;padding:0 6px}
-.bar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:.6rem;justify-content:center;padding:1.2rem .8rem calc(.7rem + env(safe-area-inset-bottom));background:linear-gradient(transparent,#000 70%);z-index:9}
-.pill,.sb{background:#26262fcc;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid #fff2;border-radius:99px}
-.pill{display:flex;flex:1;max-width:420px;padding:.3rem}.pill a{flex:1;text-align:center;padding:.5rem 0;border-radius:99px;color:#ccc;text-decoration:none;font-size:.75rem;font-weight:600}
-.pill a.on{background:#a855f733;color:var(--ac)}.sb{width:62px;display:flex;align-items:center;justify-content:center;color:#ddd}.sb.on{color:var(--ac)}
-.bar svg{width:24px;height:24px;display:block;margin:0 auto 2px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}"""
+#vs .bd{left:16px;bottom:calc(16px + env(safe-area-inset-bottom));width:30px;height:30px}#vx{position:fixed;top:calc(12px + env(safe-area-inset-top));right:16px;z-index:21;background:#000a;border-radius:50%;width:40px;height:40px;padding:0}
+.venrow{display:flex;gap:12px;align-items:center;margin:12px 0}.venrow img{width:96px;aspect-ratio:16/9;object-fit:cover;border-radius:var(--r1);background:var(--s2);flex:none}"""
 T = {
 "base": """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ShowProof</title><link rel=icon href="/logo.svg"><link rel=apple-touch-icon href="/apple-touch-icon.png"><meta name=apple-mobile-web-app-title content="ShowProof"><meta name=theme-color content="#0d0d12"><style>""" + CSS + """</style>
-<header><img src="/logo.svg" alt=""><b>ShowProof</b></header><main>{% for m in get_flashed_messages() %}<p class=flash>{{m}}</p>{% endfor %}{% block c %}{% endblock %}</main>
+<header><a class=brand href="/"><img src="/logo.svg" alt=""><b>ShowProof</b></a>{% if g.user %}<a class=ib href="/new" aria-label="Add show"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></a>{% endif %}</header><main>{% for m in get_flashed_messages() %}<p class=flash>{{m}}</p>{% endfor %}{% block c %}{% endblock %}</main>
 {% if g.user %}{% set e=request.endpoint %}<div class=bar><nav class=pill>
 <a href="/" class="{{'on' if e in ('home','user','concert','new')}}"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v10H3z"/></svg>Shows</a>
 <a href="/people" class="{{'on' if e=='people'}}"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4.5a3.5 3.5 0 010 7M18 15c2.5.6 4 2.4 4 6"/></svg>People</a>
@@ -455,12 +465,12 @@ T = {
 <input name=name placeholder=Name required><br><input name=pw type=password placeholder="Password (8+ chars)" required><br><button>Create account</button></form>{% endblock %}""",
 "invites": """{% extends "base" %}{% block c %}<h2>Invites</h2><form method=post>{{tok()}}<button>New invite link</button></form>
 {% for r in rows %}<div class=row>{% if r.who %}<span class=mu>Used by {{r.who}}</span>{% else %}<code>{{request.host_url}}join?token={{r.token}}</code>{% endif %}</div>{% endfor %}{% endblock %}""",
-"home": """{% extends "base" %}{% block c %}<h2>{{who.name}}'s shows <span class=mu>({{rows|length}})</span>{% if mine %} <a href="/new">＋</a>{% endif %}</h2>
+"home": """{% extends "base" %}{% block c %}<h1>{{who.name}}'s shows <span class=mu>{{rows|length}}</span></h1>
 <form class=chips>{% if sort!='date' or year %}<a class=x href="{{request.path}}">✕</a>{% endif %}
 <select name=year onchange="this.form.submit()"><option value="">Years</option>{% for y in years %}<option {{'selected' if y==year}}>{{y}}</option>{% endfor %}</select>
 <select name=sort onchange="this.form.submit()">{% for k,l in [('date','Newest'),('oldest','Oldest'),('artist','Artist'),('venue','Venue'),('city','City'),('added','Recently added')] %}<option value={{k}} {{'selected' if k==sort}}>Sort: {{l}}</option>{% endfor %}</select></form>
 <div class=grid>{% for r in rows %}<a class=card href="/c/{{r.id}}" style="--h:{{r.artist|hue}}">{% if r.poster %}<img loading=lazy src="/cover/{{r.id}}?v={{r.poster[:8]}}">{% elif r.venue %}<img loading=lazy src="/venue.img?n={{r.venue|urlencode}}&c={{r.city|urlencode}}" onerror="this.remove()">{% endif %}
-<div class=ov><b>{{r.artist}}</b><span>{{r.date}} · {{r.venue}}</span></div>{% if r.n %}<i class=dot>{{r.n}}</i>{% endif %}</a>{% else %}<p class=mu>Nothing yet. Set your setlist.fm username under Me, or tap ＋.</p>{% endfor %}</div>{% endblock %}""",
+<div class=ov><b>{{r.artist}}</b><span>{{r.date}} · {{r.venue}}</span></div>{% if r.n %}<i class=dot>{{r.n}}</i>{% endif %}</a>{% else %}<p class=mu>Nothing yet. Set your setlist.fm username under Me, or tap + at the top.</p>{% endfor %}</div>{% endblock %}""",
 "people": """{% extends "base" %}{% block c %}<h2>People</h2>{% for r in rows %}<a class=row href="/u/{{r.name}}"><b>{{r.name}}</b> <span class=mu>{{r.n}} shows</span></a>{% endfor %}{% endblock %}""",
 "settings": """{% extends "base" %}{% block c %}<h2>{{u.name}}</h2><h3>setlist.fm</h3><p class=mu>Shows you attended are imported daily. Last sync: {{u.last_sync|ts}}</p>
 <form method=post>{{tok()}}<input name=sfm_user value="{{u.sfm_user or ''}}" placeholder="setlist.fm username"><button>Save &amp; import</button></form>
